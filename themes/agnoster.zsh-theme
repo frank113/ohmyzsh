@@ -34,6 +34,9 @@
 
 CURRENT_BG='NONE'
 
+## Added by FK for his light theme
+SOLARIZED_THEME="light"
+
 case ${SOLARIZED_THEME:-dark} in
     light) CURRENT_FG='white';;
     *)     CURRENT_FG='black';;
@@ -88,8 +91,16 @@ prompt_end() {
 
 # Context: user@hostname (who am I and where am I)
 prompt_context() {
-  if [[ "$USERNAME" != "$DEFAULT_USER" || -n "$SSH_CLIENT" ]]; then
-    prompt_segment black default "%(!.%{%F{yellow}%}.)%n@%m"
+##   if [[ "$USER" == "fkovacs" ]]; then
+##     prompt_segment green default "%(!.%{%F{yellow}%}.)%n@%m"
+##   fi
+###### CHANGE THIS TO FIX THE FIRST PART OF THE PROMPT
+  if [[ "$USER" != "$DEFAULT_USER" || -n "$SSH_CLIENT" ]]; then
+    prompt_segment 040 default "%B%(!.%{%F{yellow}%}.)%n@%m%b"
+## =======
+##   if [[ "$USERNAME" != "$DEFAULT_USER" || -n "$SSH_CLIENT" ]]; then
+##     prompt_segment black default "%(!.%{%F{yellow}%}.)%n@%m"
+## >>>>>>> f9f01e48a890ad4359a6973d1b8a7039f57b2d08
   fi
 }
 
@@ -214,8 +225,9 @@ prompt_hg() {
 }
 
 # Dir: current working directory
+# https://github.com/agnoster/agnoster-zsh-theme/issues/19
 prompt_dir() {
-  prompt_segment blue $CURRENT_FG '%~'
+  prompt_segment blue $CURRENT_FG '%2/ '
 }
 
 # Virtualenv: current working virtualenv
