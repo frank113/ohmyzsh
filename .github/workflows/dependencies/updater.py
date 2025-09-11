@@ -18,13 +18,6 @@ TMP_DIR = os.path.join(os.environ.get("TMP_DIR", "/tmp"), "ohmyzsh")
 DEPS_YAML_FILE = ".github/dependencies.yml"
 # Dry run flag
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1"
-# GitHub Token is needed to avoid rate limiting
-GH_TOKEN = os.environ.get("GH_TOKEN")
-HEADERS = {
-    "Accept": "application/vnd.github+json",
-}
-if GH_TOKEN:
-    HEADERS["Authorization"] = f"Bearer {GH_TOKEN}"
 
 # utils for tag comparison
 BASEVERSION = re.compile(
@@ -226,32 +219,31 @@ class Dependency:
                     # Create new branch
                     branch = Git.checkout_or_create_branch(branch_name)
 
+                    # Update dependencies.yml file
+                    self.__update_yaml(
+                        f"tag:{new_version}" if is_tag else status["version"]
+                    )
+
                     # Update dependency files
                     self.__apply_upstream_changes()
 
-                    if not Git.repo_is_clean():
-                        # Update dependencies.yml file
-                        self.__update_yaml(
-                            f"tag:{new_version}" if is_tag else status["version"]
-                        )
+                    # Add all changes and commit
+                    has_new_commit = Git.add_and_commit(self.name, new_version)
 
-                        # Add all changes and commit
-                        has_new_commit = Git.add_and_commit(self.name, new_version)
+                    if has_new_commit:
+                        # Push changes to remote
+                        Git.push(branch)
 
-                        if has_new_commit:
-                            # Push changes to remote
-                            Git.push(branch)
+                        # Create GitHub PR
+                        GitHub.create_pr(
+                            branch,
+                            f"feat({self.name}): update to version {new_version}",
+                            f"""## Description
 
-                            # Create GitHub PR
-                            GitHub.create_pr(
-                                branch,
-                                f"chore({self.name}): update to version {new_version}",
-                                f"""## Description
-
-Update for **{self.desc}**: update to version [{new_version}]({status["head_url"]}).
-Check out the [list of changes]({status["compare_url"]}).
+Update for **{self.desc}**: update to version [{new_version}]({status['head_url']}).
+Check out the [list of changes]({status['compare_url']}).
 """,
-                            )
+                        )
 
                     # Clean up repository
                     Git.clean_repo()
@@ -283,8 +275,8 @@ Check out the [list of changes]({status["compare_url"]}).
 
 There is a new version of `{self.name}` {self.kind} available.
 
-New version: [{new_version}]({status["head_url"]})
-Check out the [list of changes]({status["compare_url"]}).
+New version: [{new_version}]({status['head_url']})
+Check out the [list of changes]({status['compare_url']}).
 """
 
                     print("Creating GitHub issue", file=sys.stderr)
@@ -386,27 +378,20 @@ class Git:
         return branch_name
 
     @staticmethod
-    def repo_is_clean() -> bool:
-        """
-        Returns `True` if the repo is clean.
-        Returns `False` if the repo is dirty.
-        """
-        try:
-            CommandRunner.run_or_fail(
-                ["git", "diff", "--exit-code"], stage="CheckRepoClean"
-            )
-            return True
-        except CommandRunner.Exception:
-            return False
-
-    @staticmethod
     def add_and_commit(scope: str, version: str) -> bool:
         """
         Returns `True` if there were changes and were indeed commited.
         Returns `False` if the repo was clean and no changes were commited.
         """
-        if Git.repo_is_clean():
+        # check if repo is clean (clean => no error, no commit)
+        try:
+            CommandRunner.run_or_fail(
+                ["git", "diff", "--exit-code"], stage="CheckRepoClean"
+            )
             return False
+        except CommandRunner.Exception:
+            # if it's other kind of error just throw!
+            pass
 
         user_name = os.environ.get("GIT_APP_NAME")
         user_email = os.environ.get("GIT_APP_EMAIL")
@@ -430,7 +415,7 @@ class Git:
                 f"user.email={user_email}",
                 "commit",
                 "-m",
-                f"chore({scope}): update to {version}",
+                f"feat({scope}): update to {version}",
             ],
             stage="CreateCommit",
             env=clean_env,
@@ -460,7 +445,7 @@ class GitHub:
         url = f"https://api.github.com/repos/{repo}/git/refs/tags"
 
         # Send a GET request to the GitHub API
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url)
         current_version = coerce(current_tag)
         if current_version is None:
             raise ValueError(
@@ -520,7 +505,7 @@ class GitHub:
         url = f"https://api.github.com/repos/{repo}/compare/{version}...{branch}"
 
         # Send a GET request to the GitHub API
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url)
 
         # If the request was successful
         if response.status_code == 200:
@@ -604,13 +589,7 @@ def main():
     DependencyStore.set(data)
 
     dependencies = data["dependencies"]
-    if len(sys.argv) > 1:
-        # argv is list of dependencies to run, default is all of them
-        dependency_list = sys.argv[1:]
-    else:
-        dependency_list = dependencies.keys()
-
-    for path in dependency_list:
+    for path in dependencies:
         dependency = Dependency(path, dependencies[path])
         dependency.update_or_notify()
 
